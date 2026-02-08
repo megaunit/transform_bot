@@ -1,0 +1,17 @@
+name: manim-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.12
+  - manim
+  - texlive-core
+  - ffmpeg
+  - tectonic
+  - poppler
+  - sympy
+  - pip
+  - pip:
+      - python-telegram-bot==22.6
+      - pytz
+      - numpy
+      - sympy
