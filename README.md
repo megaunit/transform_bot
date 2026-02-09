@@ -42,14 +42,16 @@ A Telegram bot that generates animated visualizations of 2D linear transformatio
     - /start:
     - **Start**: Brief introduction and usage instructions by using `/start` command
     - **Set Function**: Use `/function <expression>` to set a function to plot (e.g., `/function x**2`). To remove the function, use `/function None`.
-  > [!TIP]
-  > Follow `SymPy` library notation for functions (it also accept `^` for powers). If no function plots, assume your notation doesn't follow `SymPy`.
+
     - **Generate Transformation**: Send a 2x2 matrix in the following format:
       ```text
       a b
       c d
       ```
     - The bot will process the matrix and reply with a video animation of the transformation.
+
+  > [!TIP]
+  > Follow `SymPy` library notation for functions (it also accept `^` for powers). If no function plots, assume your notation doesn't follow `SymPy`.
 
 3.  **Example**
     - Run this command `/function cos(x)^2 - x/2` to visualize how this function transform with different matrices
