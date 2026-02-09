@@ -14,4 +14,3 @@ dependencies:
       - python-telegram-bot==22.6
       - pytz
       - numpy
-      - sympy

@@ -10,6 +10,7 @@ import pytz
 import telegram._utils.datetime as tg_datetime
 import telegram.ext._jobqueue as tg_jobqueue
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 
@@ -53,10 +54,54 @@ def ensure_config_file():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
-        await update.message.reply_text(
-        '''Send matrix in the following form:
-a11 a12
-a21 a22''')
+        await update.message.reply_text('Welcome to <b>Linear Transformation</b> Bot!\n\nTo visualize a linear transformation, please send a 2x2 matrix in following form:\n<code>a11 a12\na21 a22</code>\n\nTo include a function in the visualization, use the /function command followed by the function expression.', parse_mode=ParseMode.HTML)
+
+async def set_function(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Save the user's function to the config file"""
+    try:
+        if not update.message or not update.effective_chat:
+            return
+            
+        channel_id = str(update.effective_chat.id)
+        # Get the function string after the command
+        func_str = " ".join(context.args)
+        
+        if not func_str:
+            await update.message.reply_text('Usage: /function <function_expression>\nTo remove the function, pass function as "None"\n\nNote: function must be in terms of x only')
+            return
+
+        if "y" in func_str:
+            await update.message.reply_text('Error: Function must be in terms of x only (no y allowed).')
+            return
+
+        # Update the config
+        ensure_config_file()
+        config = {}
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            config = {}
+            
+        # Ensure user entry exists
+        if channel_id not in config:
+            config[channel_id] = {}
+        
+        # Handle legacy list format if encountered
+        if isinstance(config[channel_id], list):
+            config[channel_id] = {"matrix": config[channel_id]}
+            
+        config[channel_id]["function"] = func_str
+        
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=4)
+            
+        await update.message.reply_text(f"Function saved: {func_str}\nTo remove function use /function None")
+
+    except Exception as e:
+        print(f"Error in set_function: {str(e)}")
+        if update.message:
+            await update.message.reply_text("An error occurred while saving the function.")
 
 async def generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
@@ -65,17 +110,19 @@ async def generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Get the channel ID to identify this request uniquely
         channel_id = update.effective_chat.id
         
-        # Extract user input from the message
+        # Extract user input from the message (Matrix only)
         try:
-            matrix = update.message.text.split("\n")
-            for row_num, row in enumerate(matrix):
-                matrix[row_num] = row.split(" ")
-            matrix = [[float(x) for x in row] for row in matrix]
-            if not (isinstance(matrix, list) and len(np.array(matrix).flatten()) == 4):
+            matrix_lines = update.message.text.strip().split("\n")
+            for row_num, row in enumerate(matrix_lines):
+                matrix_lines[row_num] = row.split(" ")
+                
+            matrix = [[float(x) for x in row] for row in matrix_lines]
+            if not (len(np.array(matrix).flatten()) == 4):
                 raise ValueError("Matrix must be a list of 4 elements")
+
         except Exception as e:
-            await update.message.reply_text("Something wrong happened, make sure format is correct.")
-            print(f"Matrix parsing error: {str(e)}")
+            await update.message.reply_text("Something wrong happened, make sure format is correct:\na11 a12\na21 a22")
+            print(f"Parsing error: {str(e)}")
             return
 
         # Generate the Manim scene based on user input and channel ID
@@ -116,16 +163,6 @@ async def generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             message_id=processing_message.message_id
         )
 
-        # Count
-        try:
-            with open("counter.json", "r") as counter_file:
-                counter = json.load(counter_file)
-            
-            counter[str(channel_id)] = counter.get(str(channel_id), 0) + 1
-            with open("counter.json", "w") as counter_file:
-                json.dump(counter, counter_file, indent=4)
-        except Exception as e:
-            print(f"Counting error: {e}")
         
         # Clean up files
         try:
@@ -165,7 +202,10 @@ def update_user_data(channel_id, matrix):
             config = {}
         
         # Update the config with the user's matrix
-        config[str(channel_id)] = matrix
+        config.setdefault(str(channel_id), {})
+        config[str(channel_id)].setdefault("function", "None")
+        config[str(channel_id)]["matrix"] = matrix
+        
         print(f"Updating config for channel {channel_id}")
         print(f"New matrix: {matrix}")
         print(f"Config after update: {config}")
@@ -177,7 +217,7 @@ def update_user_data(channel_id, matrix):
             print(f"Successfully wrote to config file: {CONFIG_FILE}")
         except Exception as e:
             print(f"Error writing to config file: {str(e)}")
-            
+
     except Exception as e:
         print(f"Error in update_user_data: {str(e)}")
         raise
@@ -237,6 +277,7 @@ def main():
     application = ApplicationBuilder().token(token).build()
     
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("function", set_function))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_video))
     
     print("Bot started successfully!")

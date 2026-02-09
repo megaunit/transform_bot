@@ -7,6 +7,8 @@ import json
 import sys
 import os
 import subprocess
+import sympy as sp
+from sympy.calculus.util import continuous_domain
 
 config.tex_template.tex_compiler = "xelatex"
 config.tex_template.output_format = ".pdf"
@@ -46,68 +48,108 @@ class Plane(VectorScene):
     def construct(self):
         with open(self.config_file_path, "r") as f:
             config = json.load(f)
-        matrix = config.get(str(self.channel_id))
-        m = [matrix[:2], matrix[2:]]
-        # func = None
-        func = lambda x: math.sqrt(x**2-1)
-        func = lambda x: abs(x)
+        user_data = config.get(str(self.channel_id))
 
-        try:
-            test_vals = np.linspace(-50, 50, 200)
-            [func(x) for x in test_vals] # testing if is defined across space
-        except (ValueError, ZeroDivisionError, ArithmeticError, TypeError):
-            func = lambda x: np.nan
-
+        matrix = user_data.get("matrix")
+        func_str = user_data.get("function")
+        if func_str == "None": func_str = None
+        
+        # Setup the Plane
         plane_scale = 0.6
-        plane = NumberPlane(x_range=[-50, 50, 1], y_range=[-50, 50, 1],).scale(plane_scale)
+        plane = NumberPlane(x_range=[-50, 50, 1], y_range=[-50, 50, 1]).scale(plane_scale)
         transformed_plane = copy(plane)
         back_plane = copy(plane).set_color(WHITE).set_opacity(0.2)
-
-        print(matrix)
         
-        eq = Tex(rf"$\begin{{bmatrix}}{matrix[0][0]}& {matrix[0][1]}\\{matrix[1][0]} & {matrix[1][1]}\end{{bmatrix}}$"
-        # eq = Tex(rf"$\begin{{bmatrix}}{1.0}& {5.0}\\{3.0} & {2.0}\end{{bmatrix}}$"
-        # eq = Text(f"{matrix[0][0]}, {matrix[0][1]}\n{matrix[1][0]},{matrix[1][1]}"
-        ).shift(UP * 3).shift(LEFT * 5.5)
-        det = Rectangle(
-            width=plane_scale,
-            height=plane_scale,
-            stroke_color=YELLOW,
-            fill_color=YELLOW,
-            fill_opacity=0.1
-        ).move_to(plane.c2p(0.5, 0.5))
-        det_val = np.linalg.det(matrix)
-        det_val = Tex(rf"$det = {round(det_val, 2)}$").next_to(eq, DOWN).scale(0.85).set_color(YELLOW)
-        # det_val = Text(rf"det = {round(det_val, 2)}").next_to(eq, DOWN).scale(0.85).set_color(YELLOW)
+        # Prepare the Graph
+        func_to_plot, intervals = self.get_plot_data(func_str, min_x=-15, max_x=15)
+        
+        graphs = VGroup()
+        if func_to_plot:
+            for start, end in intervals:
+                segment = plane.plot(
+                    func_to_plot, 
+                    x_range=[start, end], 
+                    color=ORANGE,
+                    use_smoothing=True 
+                )
+                graphs.add(segment)
+        
+        # Setup Text & Vectors
+        matrix_tex = Tex(rf"$\begin{{bmatrix}}{matrix[0][0]}& {matrix[0][1]}\\{matrix[1][0]} & {matrix[1][1]}\end{{bmatrix}}$")
+        matrix_tex.shift(UP * 3, LEFT * 5.5)
+        
+        det = Rectangle(width=plane_scale, height=plane_scale, stroke_color=YELLOW, fill_color=YELLOW, fill_opacity=0.1)
+        det.move_to(plane.c2p(0.5, 0.5))
+        
+        det_val_num = np.linalg.det(matrix)
+        det_val = Tex(rf"$det = {round(det_val_num, 2)}$").next_to(matrix_tex, DOWN).scale(0.85).set_color(YELLOW)
         
         i = Vector(plane.c2p(1, 0), color=GREEN)
         j = Vector(plane.c2p(0, 1), color=RED)
         
-        if func:
-            func = plane.plot(func)
-        group = VGroup(func, plane, det).move_to(ORIGIN) if func else VGroup(plane, det).move_to(ORIGIN)
-        self.add(eq)
-        self.add(plane)
-        self.add(back_plane)
-        self.add(det)
-        self.add(i)
-        self.add(j)
-        self.bring_to_back(plane)
-        self.bring_to_back(back_plane)
+        # Add initial objects
+        self.add(matrix_tex, plane, back_plane, det, i, j)
+        self.bring_to_back(plane, back_plane)
         transformed_plane.apply_matrix(matrix)
-        
-        if func:
-            self.play(Create(func, run_time=1.5, rate_func=linear))
+
+        # Draw Graph
+        if len(graphs) > 0:
+            self.play(Create(graphs), run_time=1.5)
+            
+        # Animate Transformation
         self.play(
             j.animate.put_start_and_end_on(j.get_start(), transformed_plane.c2p(0,1)),
             i.animate.put_start_and_end_on(i.get_start(), transformed_plane.c2p(1,0)),
             ReplacementTransform(plane, transformed_plane),
             det.animate.apply_matrix(matrix),
-            func.animate.apply_matrix(matrix),
+            graphs.animate.apply_matrix(matrix), 
             run_time=3,
-            rate_func=smooth,
-            path_func=straight_path()
+            rate_func=smooth
         )
         self.play(Write(det_val), run_time=1.4)
-        self.wait(0.5)
-        self.wait(1.5)
+        self.wait(2)
+
+    def get_plot_data(self, func_str, min_x=-50, max_x=50):
+        if not func_str or func_str == "None":
+            return None, []
+
+        try:
+            x = sp.Symbol('x', real=True)
+            clean_str = func_str.replace("^", "**")
+            expr = sp.parse_expr(clean_str)
+            
+            domain = continuous_domain(expr, x, sp.Interval(min_x, max_x))
+            
+            valid_intervals = []
+            if isinstance(domain, sp.Interval):
+                valid_intervals = [domain]
+            elif isinstance(domain, sp.Union):
+                valid_intervals = list(domain.args)
+                
+            clean_intervals = []
+            for interval in valid_intervals:
+                try:
+                    start = float(interval.start)
+                    end = float(interval.end)
+                    # Don't plot tiny dots or backwards ranges
+                    if end > start + 0.05: 
+                        clean_intervals.append((start, end))
+                except (TypeError, ValueError):
+                    continue
+
+            f_np = sp.lambdify(x, expr, modules=['numpy'])
+
+            # Define the safe wrapper
+            def safe_f(t):
+                try:
+                    val = f_np(t)
+                    if not np.isfinite(val): return np.nan
+                    return val.real 
+                except:
+                    return np.nan
+
+            return safe_f, clean_intervals
+
+        except Exception as e:
+            print(f"Error processing function '{func_str}': {e}")
+            return None, []
